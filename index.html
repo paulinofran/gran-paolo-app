@@ -155,19 +155,24 @@
 
   <!-- RENDIMENTO -->
   <section class="screen" id="screen-rendimento">
-    <div class="callout ok">Entra automaticamente no estoque Central</div>
+    <div class="callout ok">Entra automaticamente no estoque Central, em peso</div>
     <div class="card">
       <label>Insumo</label>
       <select id="rendInsumo"></select>
-      <label>Origem</label>
-      <select id="rendOrigem">
-        <option value="preparo">Preparo (cozimento)</option>
-        <option value="pre_porcionamento">Pré-porcionamento</option>
-      </select>
-      <label>Quantidade de porções geradas</label>
-      <input type="number" id="rendQtd" placeholder="Ex: 120">
-      <label>Nota fiscal de origem (opcional, calcula custo por porção)</label>
-      <select id="rendNota"><option value="">Nenhuma</option></select>
+      <label>Nota fiscal de origem (opcional, já traz o valor da compra)</label>
+      <select id="rendNota"><option value="">Nenhuma / informar valor manual</option></select>
+
+      <label>Valor total da compra (R$)</label>
+      <input type="number" step="0.01" id="rendValorCompra" placeholder="Ex: 249.30">
+
+      <label>Custo adicional do lote (tempero, gás, embalagem etc — R$)</label>
+      <input type="number" step="0.01" id="rendCustoAdicional" placeholder="Ex: 15.60">
+
+      <label>Peso do rendimento final, já pronto pra uso (kg)</label>
+      <input type="number" step="0.001" id="rendPesoFinal" placeholder="Ex: 10.920">
+
+      <div id="rendPreviewCusto" class="callout" style="display:none;margin-top:10px;"></div>
+
       <button class="primary" style="width:100%;margin-top:12px;" id="btnSalvarRendimento">Salvar rendimento</button>
     </div>
     <div id="rendimentosRecentes"></div>
@@ -212,9 +217,9 @@ function loadDB(){
   if(raw) return JSON.parse(raw);
   const seed = {
     insumos: [
-      {id:"frango", nome:"Frango", tipoPorcao:"processado_com_rendimento", tamanhoPorcaoLabel:"70g", saldoCentral:0, saldoProducao:0, minimoProducao:15},
-      {id:"mussarela_g", nome:"Mussarela grande", tipoPorcao:"pre_porcionado_direto", tamanhoPorcaoLabel:"200g", saldoCentral:0, saldoProducao:0, minimoProducao:10},
-      {id:"mussarela_p", nome:"Mussarela pequena", tipoPorcao:"pre_porcionado_direto", tamanhoPorcaoLabel:"100g", saldoCentral:0, saldoProducao:0, minimoProducao:10}
+      {id:"frango", nome:"Frango", porcaoReferenciaG:70, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:1000},
+      {id:"mussarela_g", nome:"Mussarela grande", porcaoReferenciaG:200, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:2000},
+      {id:"mussarela_p", nome:"Mussarela pequena", porcaoReferenciaG:100, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:1000}
     ],
     contasPagar: [],
     notasFiscais: [],
@@ -529,51 +534,89 @@ document.getElementById("btnSalvarConta").addEventListener("click", ()=>{
   showScreen("contas");
 });
 
+/* ---------- Helpers de peso ---------- */
+function formatPeso(g){
+  if(g >= 1000) return (g/1000).toFixed(3).replace(".",",")+" kg";
+  return Math.round(g)+" g";
+}
+
 /* ---------- Rendimento ---------- */
 function renderRendimento(){
   const selInsumo = document.getElementById("rendInsumo");
-  selInsumo.innerHTML = db.insumos.map(i=>'<option value="'+i.id+'">'+esc(i.nome)+' ('+i.tamanhoPorcaoLabel+')</option>').join("");
+  selInsumo.innerHTML = db.insumos.map(i=>'<option value="'+i.id+'">'+esc(i.nome)+' (ref: '+i.porcaoReferenciaG+'g)</option>').join("");
   const selNota = document.getElementById("rendNota");
   const notasLivres = db.notasFiscais.filter(n=>!n.lancamentoRendimentoId);
-  selNota.innerHTML = '<option value="">Nenhuma</option>'+notasLivres.map(n=>
+  selNota.innerHTML = '<option value="">Nenhuma / informar valor manual</option>'+notasLivres.map(n=>
     '<option value="'+n.id+'">'+esc(n.fornecedor)+' — R$ '+Number(n.valor).toFixed(2).replace(".",",")+'</option>').join("");
-  document.getElementById("rendQtd").value="";
+  document.getElementById("rendValorCompra").value="";
+  document.getElementById("rendCustoAdicional").value="";
+  document.getElementById("rendPesoFinal").value="";
+  document.getElementById("rendPreviewCusto").style.display="none";
 
   const rec = db.rendimentos.slice().reverse().slice(0,5);
   document.getElementById("rendimentosRecentes").innerHTML = rec.length ?
     "<h3>Últimos lançamentos</h3>"+rec.map(r=>{
       const insumo = db.insumos.find(i=>i.id===r.insumoId);
-      return '<div class="card"><p class="item-title">'+esc(insumo?insumo.nome:r.insumoId)+' — '+r.quantidade+' porções</p>'+
-        '<p class="item-sub">'+(r.custoPorPorcao?("R$ "+r.custoPorPorcao.toFixed(2).replace(".",",")+" / porção · "):"")+r.data+'</p></div>';
+      return '<div class="card"><p class="item-title">'+esc(insumo?insumo.nome:r.insumoId)+' — '+formatPeso(r.pesoFinalG)+'</p>'+
+        '<p class="item-sub">R$ '+r.custoPorGrama.toFixed(4).replace(".",",")+" / g (R$ "+(r.custoPorGrama*(r.porcaoReferenciaG||0)).toFixed(2).replace(".",",")+" / porção de "+(r.porcaoReferenciaG||"?")+"g) · "+r.data+'</p></div>';
     }).join("") : "";
 }
+document.getElementById("rendNota").addEventListener("change", (e)=>{
+  const nota = db.notasFiscais.find(n=>n.id===e.target.value);
+  if(nota) document.getElementById("rendValorCompra").value = nota.valor;
+});
 document.getElementById("btnSalvarRendimento").addEventListener("click", ()=>{
   const insumoId = document.getElementById("rendInsumo").value;
-  const origem = document.getElementById("rendOrigem").value;
-  const qtd = parseInt(document.getElementById("rendQtd").value);
-  if(!qtd || qtd<=0){ alert("Informe a quantidade de porções geradas."); return; }
+  const valorCompra = parseFloat(document.getElementById("rendValorCompra").value)||0;
+  const custoAdicional = parseFloat(document.getElementById("rendCustoAdicional").value)||0;
+  const pesoFinalKg = parseFloat(document.getElementById("rendPesoFinal").value);
+  if(!pesoFinalKg || pesoFinalKg<=0){ alert("Informe o peso do rendimento final."); return; }
+  if(!valorCompra){ alert("Informe o valor da compra (ou selecione uma nota fiscal)."); return; }
   const notaId = document.getElementById("rendNota").value || null;
-  let custoPorPorcao = null;
   if(notaId){
     const nota = db.notasFiscais.find(n=>n.id===notaId);
-    if(nota){ custoPorPorcao = Number(nota.valor)/qtd; nota.lancamentoRendimentoId = "rend_"+Date.now(); }
+    if(nota) nota.lancamentoRendimentoId = "rend_"+Date.now();
   }
+  const pesoFinalG = pesoFinalKg*1000;
+  const custoTotal = valorCompra + custoAdicional;
+  const custoPorGrama = custoTotal / pesoFinalG;
+
   const insumo = db.insumos.find(i=>i.id===insumoId);
-  insumo.saldoCentral += qtd;
+  insumo.saldoCentralG += pesoFinalG;
+  insumo.custoPorGrama = custoPorGrama; // atualiza sempre com o custo do lote mais recente
+
   db.rendimentos.push({
-    id:"rend_"+Date.now(), empresaId:EMPRESA_ID, lojaId:LOJA_ID, insumoId, quantidade:qtd,
-    origem, notaFiscalId:notaId, custoPorPorcao, data:new Date().toISOString().slice(0,10)
+    id:"rend_"+Date.now(), empresaId:EMPRESA_ID, lojaId:LOJA_ID, insumoId,
+    valorCompra, custoAdicional, pesoFinalG, custoPorGrama, porcaoReferenciaG: insumo.porcaoReferenciaG,
+    notaFiscalId:notaId, data:new Date().toISOString().slice(0,10)
   });
-  db.movimentacoes.push({insumoId, tipo:"rendimento", localDestino:"central", quantidade:qtd, data:new Date().toISOString()});
+  db.movimentacoes.push({insumoId, tipo:"rendimento", localDestino:"central", pesoG:pesoFinalG, data:new Date().toISOString()});
   saveDB(db);
   renderRendimento();
-  alert("Rendimento salvo! "+qtd+" porções entraram no estoque Central.");
+  alert("Rendimento salvo! "+formatPeso(pesoFinalG)+" entraram no estoque Central.\nCusto: R$ "+custoPorGrama.toFixed(4).replace(".",",")+" por grama (R$ "+(custoPorGrama*insumo.porcaoReferenciaG).toFixed(2).replace(".",",")+" por porção de "+insumo.porcaoReferenciaG+"g).");
 });
+["rendValorCompra","rendCustoAdicional","rendPesoFinal"].forEach(id=>{
+  document.getElementById(id).addEventListener("input", atualizarPreviewCusto);
+});
+function atualizarPreviewCusto(){
+  const valorCompra = parseFloat(document.getElementById("rendValorCompra").value)||0;
+  const custoAdicional = parseFloat(document.getElementById("rendCustoAdicional").value)||0;
+  const pesoFinalKg = parseFloat(document.getElementById("rendPesoFinal").value)||0;
+  const preview = document.getElementById("rendPreviewCusto");
+  if(pesoFinalKg>0 && (valorCompra+custoAdicional)>0){
+    const insumo = db.insumos.find(i=>i.id===document.getElementById("rendInsumo").value);
+    const custoPorGrama = (valorCompra+custoAdicional)/(pesoFinalKg*1000);
+    preview.style.display="block";
+    preview.textContent = "Custo calculado: R$ "+custoPorGrama.toFixed(4).replace(".",",")+" / g  ·  R$ "+(custoPorGrama*(insumo?insumo.porcaoReferenciaG:70)).toFixed(2).replace(".",",")+" por porção de "+(insumo?insumo.porcaoReferenciaG:70)+"g";
+  } else {
+    preview.style.display="none";
+  }
+}
 
 /* ---------- Estoque ---------- */
-function statusBadge(insumo, saldo){
-  if(saldo <= 0) return {cls:"danger", label:"repor"};
-  if(saldo < insumo.minimoProducao) return {cls:"warn", label:"atenção"};
+function statusBadge(insumo, saldoG){
+  if(saldoG <= 0) return {cls:"danger", label:"repor"};
+  if(saldoG < insumo.minimoProducaoG) return {cls:"warn", label:"atenção"};
   return {cls:"ok", label:"ok"};
 }
 function renderEstoque(){
@@ -581,33 +624,33 @@ function renderEstoque(){
   const cen = document.getElementById("estoqueCentral");
   if(db.insumos.length===0){ prod.innerHTML=cen.innerHTML='<div class="empty">Nenhum insumo cadastrado.</div>'; return; }
   prod.innerHTML = db.insumos.map(i=>{
-    const s = statusBadge(i, i.saldoProducao);
+    const s = statusBadge(i, i.saldoProducaoG);
     return '<div class="card row"><div><p class="item-title">'+esc(i.nome)+'</p>'+
-      '<p class="item-sub">'+i.saldoProducao+' porções</p></div>'+
+      '<p class="item-sub">'+formatPeso(i.saldoProducaoG)+'</p></div>'+
       '<span class="badge '+s.cls+'">'+s.label+'</span></div>';
   }).join("");
   cen.innerHTML = db.insumos.map(i=>{
     return '<div class="card row"><div><p class="item-title">'+esc(i.nome)+'</p>'+
-      '<p class="item-sub">'+i.saldoCentral+' porções</p></div>'+
+      '<p class="item-sub">'+formatPeso(i.saldoCentralG)+'</p></div>'+
       '<button class="small" onclick="transferir(\''+i.id+'\')">transferir</button></div>';
   }).join("");
 }
 function transferir(insumoId){
   const insumo = db.insumos.find(i=>i.id===insumoId);
-  const qtd = parseInt(prompt("Quantas porções transferir do Central para o Produção?\nDisponível no Central: "+insumo.saldoCentral));
-  if(!qtd || qtd<=0) return;
-  if(qtd > insumo.saldoCentral){ alert("Não há porções suficientes no Central."); return; }
-  insumo.saldoCentral -= qtd;
-  insumo.saldoProducao += qtd;
-  db.movimentacoes.push({insumoId, tipo:"transferencia", localOrigem:"central", localDestino:"producao", quantidade:qtd, data:new Date().toISOString()});
+  const respostaG = parseFloat(prompt("Quantos GRAMAS transferir do Central para o Produção?\nDisponível no Central: "+formatPeso(insumo.saldoCentralG)));
+  if(!respostaG || respostaG<=0) return;
+  if(respostaG > insumo.saldoCentralG){ alert("Não há peso suficiente no Central."); return; }
+  insumo.saldoCentralG -= respostaG;
+  insumo.saldoProducaoG += respostaG;
+  db.movimentacoes.push({insumoId, tipo:"transferencia", localOrigem:"central", localDestino:"producao", pesoG:respostaG, data:new Date().toISOString()});
   saveDB(db);
   renderEstoque();
 }
-function debitarVenda(insumoId, porcoes){
+function debitarVenda(insumoId, gramas){
   const insumo = db.insumos.find(i=>i.id===insumoId);
   if(!insumo) return;
-  insumo.saldoProducao = Math.max(0, insumo.saldoProducao - porcoes);
-  db.movimentacoes.push({insumoId, tipo:"saida_venda", localOrigem:"producao", quantidade:porcoes, data:new Date().toISOString()});
+  insumo.saldoProducaoG = Math.max(0, insumo.saldoProducaoG - gramas);
+  db.movimentacoes.push({insumoId, tipo:"saida_venda", localOrigem:"producao", pesoG:gramas, data:new Date().toISOString()});
   saveDB(db);
 }
 
@@ -617,8 +660,8 @@ function renderConferencia(){
   const lista = document.getElementById("conferenciaLista");
   lista.innerHTML = db.insumos.map(i=>{
     return '<div class="card">'+
-      '<div class="row"><span class="item-title">'+esc(i.nome)+' · Produção · esperado</span><span class="item-title">'+i.saldoProducao+'</span></div>'+
-      '<label>Contagem física</label><input type="number" id="conf_'+i.id+'" value="'+i.saldoProducao+'">'+
+      '<div class="row"><span class="item-title">'+esc(i.nome)+' · Produção · esperado</span><span class="item-title">'+formatPeso(i.saldoProducaoG)+'</span></div>'+
+      '<label>Peso físico pesado agora (kg)</label><input type="number" step="0.001" id="conf_'+i.id+'" value="'+(i.saldoProducaoG/1000).toFixed(3)+'">'+
       '</div>';
   }).join("") + '<button class="primary" style="width:100%;margin-top:6px;" onclick="confirmarConferencia()">Confirmar conferência</button>'+
     '<div id="divergenciaResultado"></div>';
@@ -627,12 +670,12 @@ function confirmarConferencia(){
   let msgs = [];
   db.insumos.forEach(i=>{
     const input = document.getElementById("conf_"+i.id);
-    const contado = parseInt(input.value);
-    const div = contado - i.saldoProducao;
-    if(div !== 0){
-      msgs.push(esc(i.nome)+": divergência de "+div+" porção(ões)");
-      db.movimentacoes.push({insumoId:i.id, tipo:"ajuste_conferencia", quantidade:div, data:new Date().toISOString()});
-      i.saldoProducao = contado;
+    const pesadoG = parseFloat(input.value)*1000;
+    const divG = Math.round(pesadoG - i.saldoProducaoG);
+    if(Math.abs(divG) >= 1){
+      msgs.push(esc(i.nome)+": divergência de "+formatPeso(Math.abs(divG))+(divG<0?" a menos":" a mais"));
+      db.movimentacoes.push({insumoId:i.id, tipo:"ajuste_conferencia", pesoG:divG, data:new Date().toISOString()});
+      i.saldoProducaoG = pesadoG;
     }
   });
   saveDB(db);
