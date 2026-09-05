@@ -188,6 +188,41 @@
     <button class="ghost" style="width:100%;" id="btnNovoInsumo">+ Cadastrar novo insumo</button>
   </section>
 
+  <!-- PRODUTOS (ficha técnica) -->
+  <section class="screen" id="screen-produtos">
+    <div class="callout">Ficha técnica provisória — será substituída pelo arquivo que o Fran vai enviar.</div>
+    <div id="produtosList"></div>
+    <div class="divider"></div>
+    <div class="card">
+      <label style="margin-top:0;">Novo produto</label>
+      <input type="text" id="novoProdNome" placeholder="Nome do produto">
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <select id="novoProdInsumo" style="flex:1;"></select>
+        <input type="number" id="novoProdGramas" placeholder="Gramas" style="width:90px;">
+      </div>
+      <button class="ghost small" style="width:100%;margin-top:8px;" id="btnAddItemProduto">+ Adicionar insumo à ficha</button>
+      <div id="novoProdItensPreview" style="margin-top:8px;"></div>
+      <button class="primary" style="width:100%;margin-top:10px;" id="btnSalvarProduto">Salvar produto</button>
+    </div>
+  </section>
+
+  <!-- VENDA (lançamento manual) -->
+  <section class="screen" id="screen-venda">
+    <div class="callout">Lançamento manual — enquanto não integra com PDV, registre aqui o que vendeu no dia.</div>
+    <div class="card">
+      <label style="margin-top:0;">Data da venda</label>
+      <input type="date" id="vendaData">
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <select id="vendaProduto" style="flex:1;"></select>
+        <input type="number" id="vendaQtd" placeholder="Qtd" style="width:70px;" value="1">
+      </div>
+      <button class="ghost small" style="width:100%;margin-top:8px;" id="btnAddLinhaVenda">+ Adicionar à venda do dia</button>
+      <div id="vendaLinhasPreview" style="margin-top:8px;"></div>
+      <button class="primary" style="width:100%;margin-top:10px;" id="btnRegistrarVenda">Registrar venda e debitar estoque</button>
+    </div>
+    <div id="vendasRecentes"></div>
+  </section>
+
   <!-- CONFERÊNCIA -->
   <section class="screen" id="screen-conferencia">
     <div class="callout">Ciclo de conferência: <span id="cicloDias">3</span> dias. Confira o Produção e ajuste se necessário.</div>
@@ -202,6 +237,8 @@
   <button data-screen="nova" data-area="contas"><span class="icon">📷</span>Nova conta</button>
   <button data-screen="rendimento" data-area="estoque"><span class="icon">📦</span>Rendimento</button>
   <button data-screen="estoque" data-area="estoque"><span class="icon">🧊</span>Estoque</button>
+  <button data-screen="produtos" data-area="estoque"><span class="icon">🍕</span>Produtos</button>
+  <button data-screen="venda" data-area="estoque"><span class="icon">🧾</span>Venda</button>
   <button data-screen="conferencia" data-area="estoque"><span class="icon">✅</span>Conferência</button>
 </nav>
 
@@ -214,13 +251,26 @@ const LOJA_ID = "centro";
 
 function loadDB(){
   const raw = localStorage.getItem(DB_KEY);
-  if(raw) return JSON.parse(raw);
+  if(raw){
+    const parsed = JSON.parse(raw);
+    if(!parsed.produtos) parsed.produtos = [];
+    if(!parsed.vendasManual) parsed.vendasManual = [];
+    return parsed;
+  }
   const seed = {
     insumos: [
       {id:"frango", nome:"Frango", porcaoReferenciaG:70, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:1000},
       {id:"mussarela_g", nome:"Mussarela grande", porcaoReferenciaG:200, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:2000},
       {id:"mussarela_p", nome:"Mussarela pequena", porcaoReferenciaG:100, custoPorGrama:0, saldoCentralG:0, saldoProducaoG:0, minimoProducaoG:1000}
     ],
+    produtos: [
+      {id:"prod_pg_frango", nome:"Pizza Grande de Frango (exemplo)", itens:[{insumoId:"frango", gramas:140}]},
+      {id:"prod_pp_frango", nome:"Pizza Pequena de Frango, 1 sabor (exemplo)", itens:[{insumoId:"frango", gramas:70}]},
+      {id:"prod_pp_frango_meio", nome:"Metade Pequena de Frango, 2 sabores (exemplo)", itens:[{insumoId:"frango", gramas:35}]},
+      {id:"prod_pg_mussarela", nome:"Pizza Grande de Mussarela (exemplo)", itens:[{insumoId:"mussarela_g", gramas:200}]},
+      {id:"prod_pp_mussarela", nome:"Pizza Pequena de Mussarela (exemplo)", itens:[{insumoId:"mussarela_p", gramas:100}]}
+    ],
+    vendasManual: [],
     contasPagar: [],
     notasFiscais: [],
     rendimentos: [],
@@ -240,9 +290,11 @@ const titles = {
   nova:["Nova conta","O que você tirou foto?"],
   rendimento:["Registrar rendimento","Entra automaticamente no estoque Central"],
   estoque:["Estoque","Gran Paolo · Unidade Centro"],
+  produtos:["Produtos","Ficha técnica de consumo por produto"],
+  venda:["Registrar venda","Lançamento manual, debita a Produção"],
   conferencia:["Fechamento e conferência","Confira o que sobrou fisicamente"]
 };
-const screenToArea = {home:"home", contas:"contas", nova:"contas", rendimento:"estoque", estoque:"estoque", conferencia:"estoque"};
+const screenToArea = {home:"home", contas:"contas", nova:"contas", rendimento:"estoque", estoque:"estoque", produtos:"estoque", venda:"estoque", conferencia:"estoque"};
 function showScreen(name){
   if(name !== "nova") editandoId = null;
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
@@ -258,6 +310,8 @@ function showScreen(name){
   if(name==="nova") renderNovaConta();
   if(name==="rendimento") renderRendimento();
   if(name==="estoque") renderEstoque();
+  if(name==="produtos") renderProdutos();
+  if(name==="venda") renderVenda();
   if(name==="conferencia") renderConferencia();
 }
 document.querySelectorAll("nav.bottom button[data-screen]").forEach(b=>{
@@ -653,6 +707,134 @@ function debitarVenda(insumoId, gramas){
   db.movimentacoes.push({insumoId, tipo:"saida_venda", localOrigem:"producao", pesoG:gramas, data:new Date().toISOString()});
   saveDB(db);
 }
+
+/* ---------- Produtos (ficha técnica) ---------- */
+let novoProdutoItens = [];
+function renderProdutos(){
+  const selInsumo = document.getElementById("novoProdInsumo");
+  selInsumo.innerHTML = db.insumos.map(i=>'<option value="'+i.id+'">'+esc(i.nome)+'</option>').join("");
+  document.getElementById("novoProdNome").value = "";
+  document.getElementById("novoProdGramas").value = "";
+  novoProdutoItens = [];
+  renderNovoProdutoPreview();
+
+  const list = document.getElementById("produtosList");
+  list.innerHTML = db.produtos.length ? db.produtos.map(p=>{
+    const itensTexto = p.itens.map(it=>{
+      const ins = db.insumos.find(i=>i.id===it.insumoId);
+      return (ins?ins.nome:it.insumoId)+": "+it.gramas+"g";
+    }).join(" · ");
+    return '<div class="card row"><div><p class="item-title">'+esc(p.nome)+'</p>'+
+      '<p class="item-sub">'+esc(itensTexto)+'</p></div>'+
+      '<button class="small ghost" onclick="excluirProduto(\''+p.id+'\')">excluir</button></div>';
+  }).join("") : '<div class="empty">Nenhum produto cadastrado ainda.</div>';
+}
+function renderNovoProdutoPreview(){
+  const box = document.getElementById("novoProdItensPreview");
+  if(novoProdutoItens.length===0){ box.innerHTML=""; return; }
+  box.innerHTML = novoProdutoItens.map((it,idx)=>{
+    const ins = db.insumos.find(i=>i.id===it.insumoId);
+    return '<div class="row" style="padding:4px 0;"><span class="item-sub">'+(ins?esc(ins.nome):it.insumoId)+': '+it.gramas+'g</span>'+
+      '<button class="small ghost" onclick="removerItemNovoProduto('+idx+')">x</button></div>';
+  }).join("");
+}
+function removerItemNovoProduto(idx){
+  novoProdutoItens.splice(idx,1);
+  renderNovoProdutoPreview();
+}
+document.getElementById("btnAddItemProduto").addEventListener("click", ()=>{
+  const insumoId = document.getElementById("novoProdInsumo").value;
+  const gramas = parseFloat(document.getElementById("novoProdGramas").value);
+  if(!gramas || gramas<=0){ alert("Informe a quantidade em gramas."); return; }
+  novoProdutoItens.push({insumoId, gramas});
+  document.getElementById("novoProdGramas").value = "";
+  renderNovoProdutoPreview();
+});
+document.getElementById("btnSalvarProduto").addEventListener("click", ()=>{
+  const nome = document.getElementById("novoProdNome").value.trim();
+  if(!nome){ alert("Dê um nome ao produto."); return; }
+  if(novoProdutoItens.length===0){ alert("Adicione pelo menos um insumo à ficha técnica."); return; }
+  db.produtos.push({id:"prod_"+Date.now(), nome, itens:novoProdutoItens.slice()});
+  saveDB(db);
+  renderProdutos();
+});
+function excluirProduto(id){
+  if(!confirm("Excluir esse produto da ficha técnica?")) return;
+  db.produtos = db.produtos.filter(p=>p.id!==id);
+  saveDB(db);
+  renderProdutos();
+}
+
+/* ---------- Registrar Venda (manual) ---------- */
+let vendaLinhas = [];
+function renderVenda(){
+  document.getElementById("vendaData").value = new Date().toISOString().slice(0,10);
+  const sel = document.getElementById("vendaProduto");
+  sel.innerHTML = db.produtos.map(p=>'<option value="'+p.id+'">'+esc(p.nome)+'</option>').join("");
+  document.getElementById("vendaQtd").value = "1";
+  vendaLinhas = [];
+  renderVendaLinhasPreview();
+
+  const rec = db.vendasManual.slice().reverse().slice(0,5);
+  document.getElementById("vendasRecentes").innerHTML = rec.length ?
+    "<h3>Últimos lançamentos</h3>"+rec.map(v=>{
+      const itensTxt = v.linhas.map(l=>{
+        const p = db.produtos.find(pr=>pr.id===l.produtoId);
+        return (p?p.nome:l.produtoId)+" x"+l.quantidade;
+      }).join(", ");
+      return '<div class="card"><p class="item-title">'+v.data+'</p><p class="item-sub">'+esc(itensTxt)+'</p></div>';
+    }).join("") : "";
+}
+function renderVendaLinhasPreview(){
+  const box = document.getElementById("vendaLinhasPreview");
+  if(vendaLinhas.length===0){ box.innerHTML=""; return; }
+  box.innerHTML = vendaLinhas.map((l,idx)=>{
+    const p = db.produtos.find(pr=>pr.id===l.produtoId);
+    return '<div class="row" style="padding:4px 0;"><span class="item-sub">'+(p?esc(p.nome):l.produtoId)+' x'+l.quantidade+'</span>'+
+      '<button class="small ghost" onclick="removerLinhaVenda('+idx+')">x</button></div>';
+  }).join("");
+}
+function removerLinhaVenda(idx){
+  vendaLinhas.splice(idx,1);
+  renderVendaLinhasPreview();
+}
+document.getElementById("btnAddLinhaVenda").addEventListener("click", ()=>{
+  if(db.produtos.length===0){ alert("Cadastre pelo menos um produto na aba Produtos antes."); return; }
+  const produtoId = document.getElementById("vendaProduto").value;
+  const quantidade = parseInt(document.getElementById("vendaQtd").value)||0;
+  if(quantidade<=0){ alert("Informe uma quantidade válida."); return; }
+  vendaLinhas.push({produtoId, quantidade});
+  renderVendaLinhasPreview();
+});
+document.getElementById("btnRegistrarVenda").addEventListener("click", ()=>{
+  if(vendaLinhas.length===0){ alert("Adicione pelo menos um produto à venda do dia."); return; }
+  const data = document.getElementById("vendaData").value || new Date().toISOString().slice(0,10);
+  // Soma o total de gramas por insumo, considerando todas as linhas
+  const totalPorInsumo = {};
+  vendaLinhas.forEach(l=>{
+    const produto = db.produtos.find(p=>p.id===l.produtoId);
+    if(!produto) return;
+    produto.itens.forEach(it=>{
+      totalPorInsumo[it.insumoId] = (totalPorInsumo[it.insumoId]||0) + it.gramas*l.quantidade;
+    });
+  });
+  let faltou = [];
+  Object.keys(totalPorInsumo).forEach(insumoId=>{
+    const insumo = db.insumos.find(i=>i.id===insumoId);
+    if(insumo && insumo.saldoProducaoG < totalPorInsumo[insumoId]){
+      faltou.push(insumo.nome+" (precisa "+formatPeso(totalPorInsumo[insumoId])+", tem "+formatPeso(insumo.saldoProducaoG)+")");
+    }
+  });
+  if(faltou.length && !confirm("Atenção, estoque de Produção insuficiente para:\n"+faltou.join("\n")+"\n\nRegistrar mesmo assim (estoque pode ficar negativo/zerado)?")) return;
+
+  Object.keys(totalPorInsumo).forEach(insumoId=>{
+    debitarVenda(insumoId, totalPorInsumo[insumoId]);
+  });
+  db.vendasManual.push({id:"venda_"+Date.now(), data, linhas:vendaLinhas.slice()});
+  saveDB(db);
+  renderVenda();
+  alert("Venda registrada e estoque de Produção atualizado!");
+});
 
 /* ---------- Conferência ---------- */
 function renderConferencia(){
